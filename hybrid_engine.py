@@ -1,100 +1,121 @@
 # ============================================================
-# NUTRIVISION AI - FINAL HYBRID ENGINE V4
+# NUTRIVISION AI - FINAL HYBRID ENGINE V6
 # ============================================================
-#
-# V4 focuses on:
-# 1. Multi-model score fusion
-# 2. Main-food vs side-dish conflict resolution
-# 3. Visually similar food resolution
-# 4. Explicit plain-rice protection
-# 5. Confidence based on final decision
-#
-# ============================================================
+
+from collections import defaultdict
 
 
 # ============================================================
-# CONFIGURATION
+# FOOD NORMALIZATION
 # ============================================================
 
-# Foods that are normally the MAIN food in an image.
+ALIASES = {
+    "chapathi": "chapati",
+    "chapati": "chapati",
+
+    "dosa": "dosa",
+
+    "idli": "idli",
+
+    "biryani": "biryani",
+
+    "poha": "poha",
+
+    "poori": "poori",
+    "puri": "poori",
+
+    "bhatura": "bhatura",
+
+    "vada": "vada",
+
+    "samosa": "samosa",
+
+    "plainrice": "plainrice",
+    "plain rice": "plainrice",
+    "whiterice": "whiterice",
+    "white rice": "whiterice",
+    "rice": "rice",
+
+    "chole": "chole",
+    "pickle": "pickle",
+    "papadam": "papadam",
+    "curd": "curd",
+
+    "coconutchutney": "coconutchutney",
+    "coconut chutney": "coconutchutney",
+
+    "greenchutney": "greenchutney",
+    "green chutney": "greenchutney",
+
+    "whitechutney": "whitechutney",
+    "white chutney": "whitechutney",
+
+    "redchutney": "redchutney",
+    "red chutney": "redchutney",
+
+    "sambar": "sambar",
+    "curry": "curry",
+
+    "omelette": "omelette",
+    "egg": "egg",
+
+    "rasgulla": "rasgulla",
+
+    "chickentikka": "chickentikka",
+
+    "kheer": "kheer",
+
+    "alooparatha": "alooparatha",
+}
+
+
+# ============================================================
+# FOOD CATEGORIES
+# ============================================================
+
 MAIN_FOODS = {
     "chapati",
-    "chapathi",
     "dosa",
     "idli",
     "biryani",
     "poha",
     "poori",
     "bhatura",
-    "samosa",
     "vada",
+    "samosa",
     "plainrice",
-    "rice",
     "whiterice",
-    "white_rice",
+    "rice",
     "omelette",
     "alooparatha",
+    "chole",
+    "chickentikka",
 }
 
-
-# Foods that are normally SIDE DISHES / ACCOMPANIMENTS.
-SIDE_DISHES = {
+ACCOMPANIMENTS = {
     "coconutchutney",
-    "coconutchutney",
-    "sambar",
+    "greenchutney",
     "whitechutney",
     "redchutney",
-    "greenchutney",
+    "sambar",
+    "curry",
     "pickle",
     "papadam",
     "curd",
-    "curry",
 }
 
-
-# Similar-food pairs.
-SIMILAR_FOOD_PAIRS = {
-    frozenset({"poori", "bhatura"}),
-    frozenset({"dosa", "omelette"}),
-    frozenset({"plainrice", "rice"}),
-    frozenset({"plainrice", "whiterice"}),
-    frozenset({"samosa", "alooparatha"}),
-}
-
-
-# Explicit food-name normalization.
-ALIASES = {
-    "chapathi": "chapati",
-    "chappathi": "chapati",
-
-    "coconut chutney": "coconutchutney",
-    "coconut_chutney": "coconutchutney",
-
-    "white chutney": "whitechutney",
-    "red chutney": "redchutney",
-    "green chutney": "greenchutney",
-
-    "white rice": "whiterice",
-    "white_rice": "whiterice",
-
-    "plain rice": "plainrice",
-    "plain_rice": "plainrice",
-
-    "aloo paratha": "alooparatha",
-    "aloo_paratha": "alooparatha",
+SECONDARY_FOODS = {
+    "egg",
+    "kheer",
+    "rasgulla",
 }
 
 
 # ============================================================
-# NORMALIZATION
+# NORMALIZE FOOD NAME
 # ============================================================
 
 def normalize_food(food):
-    """
-    Normalize food names so predictions from different models
-    can be compared correctly.
-    """
-
     if food is None:
         return None
 
@@ -105,399 +126,371 @@ def normalize_food(food):
     if food in ALIASES:
         return ALIASES[food]
 
-    food = food.replace(" ", "")
+    food_no_space = food.replace(" ", "")
 
-    if food in ALIASES:
-        return ALIASES[food]
-
-    return food
+    return ALIASES.get(food_no_space, food_no_space)
 
 
 # ============================================================
-# ADD MODEL PREDICTIONS
+# NORMALIZE PREDICTIONS
 # ============================================================
 
-def add_predictions(scores, predictions, model_weight):
-    """
-    Add predictions from one model into the common score table.
-
-    Multiple detections of the same food are accumulated using
-    the strongest confidence plus a smaller contribution from
-    additional detections.
-    """
+def normalize_predictions(predictions):
+    normalized = []
 
     if not predictions:
-        return
+        return normalized
 
-    food_groups = {}
+    for item in predictions:
 
-    for prediction in predictions:
-
-        if not isinstance(prediction, dict):
+        if not isinstance(item, dict):
             continue
 
-        food = normalize_food(prediction.get("food"))
-        confidence = prediction.get("confidence", 0.0)
-
-        if not food:
-            continue
+        food = normalize_food(item.get("food"))
 
         try:
-            confidence = float(confidence)
+            confidence = float(item.get("confidence", 0.0))
         except (TypeError, ValueError):
+            confidence = 0.0
+
+        if food is None:
             continue
 
         confidence = max(0.0, min(1.0, confidence))
 
-        food_groups.setdefault(food, []).append(confidence)
+        normalized.append({
+            "food": food,
+            "confidence": confidence
+        })
 
-    for food, confidences in food_groups.items():
-
-        confidences.sort(reverse=True)
-
-        # Strongest detection receives full contribution.
-        contribution = confidences[0]
-
-        # Additional detections give smaller supporting evidence.
-        if len(confidences) > 1:
-            contribution += 0.25 * confidences[1]
-
-        if len(confidences) > 2:
-            contribution += 0.10 * confidences[2]
-
-        contribution *= model_weight
-
-        scores[food] = scores.get(food, 0.0) + contribution
+    return normalized
 
 
 # ============================================================
-# MODEL SUPPORT COUNT
+# AGGREGATE MODEL PREDICTIONS
 # ============================================================
 
-def get_model_support(food, yolo, api1, api2):
-    """
-    Count how many independent models support a food.
-    """
+def aggregate_predictions(predictions):
+    scores = defaultdict(float)
 
-    food = normalize_food(food)
+    for item in predictions:
 
-    support = 0
+        food = item["food"]
+        confidence = item["confidence"]
+
+        # Multiple detections of the same food should help,
+        # but not grow without limit.
+        scores[food] += confidence
+
+    return dict(scores)
+
+
+# ============================================================
+# TOP SCORE
+# ============================================================
+
+def get_top_score(scores):
+
+    if not scores:
+        return None, 0.0
+
+    food = max(scores, key=scores.get)
+
+    return food, scores[food]
+
+
+# ============================================================
+# SUPPORTING MODEL COUNT
+# ============================================================
+
+def calculate_supporting_models(food, yolo, api1, api2):
+
+    count = 0
 
     for predictions in (yolo, api1, api2):
 
-        found = False
+        foods = {
+            item["food"]
+            for item in predictions
+        }
 
-        for prediction in predictions or []:
+        if food in foods:
+            count += 1
 
-            if not isinstance(prediction, dict):
-                continue
+    return count
 
-            predicted_food = normalize_food(
-                prediction.get("food")
+
+# ============================================================
+# MAIN-FOOD BONUS
+# ============================================================
+
+def main_food_bonus(food):
+
+    if food in MAIN_FOODS:
+        return 0.10
+
+    return 0.0
+
+
+# ============================================================
+# ACCOMPANIMENT PENALTY
+# ============================================================
+
+def accompaniment_penalty(food):
+
+    if food in ACCOMPANIMENTS:
+        return 0.10
+
+    return 0.0
+
+
+# ============================================================
+# POORI / BHATURA SPECIAL RULE
+# ============================================================
+
+def resolve_poori_bhatura(scores, api1, api2):
+
+    poori_api2 = 0.0
+    bhatura_api1 = 0.0
+
+    for item in api2:
+        if item["food"] == "poori":
+            poori_api2 = max(poori_api2, item["confidence"])
+
+    for item in api1:
+        if item["food"] == "bhatura":
+            bhatura_api1 += item["confidence"]
+
+    # Strong explicit POORI evidence from API2 should win
+    # over repeated Bhatura detections from API1.
+    if poori_api2 >= 0.85:
+
+        scores["poori"] = scores.get("poori", 0.0) + 0.70
+
+        scores["bhatura"] = max(
+            0.0,
+            scores.get("bhatura", 0.0) - 0.50
+        )
+
+        return "poori"
+
+    # If both are present but POORI has meaningful evidence,
+    # prefer POORI because they are visually similar foods.
+    if poori_api2 >= 0.70:
+
+        poori_score = scores.get("poori", 0.0)
+        bhatura_score = scores.get("bhatura", 0.0)
+
+        if poori_score >= bhatura_score * 0.65:
+
+            scores["poori"] = poori_score + 0.45
+
+            scores["bhatura"] = max(
+                0.0,
+                bhatura_score - 0.30
             )
 
-            if predicted_food == food:
-                found = True
-                break
+            return "poori"
 
-        if found:
-            support += 1
-
-    return support
+    return None
 
 
 # ============================================================
-# RAW SCORE FUSION
+# PLAIN RICE / RICE SPECIAL RULE
 # ============================================================
 
-def build_scores(yolo, api1, api2):
-    """
-    Combine YOLO + API1 + API2 predictions.
+def resolve_rice(scores, yolo, api1, api2):
 
-    YOLO is useful for visual object detection.
-    API1/API2 provide additional classification evidence.
-    """
+    plainrice_yolo = 0.0
+    rice_api2 = 0.0
+    whiterice_api1 = 0.0
 
-    scores = {}
+    for item in yolo:
+        if item["food"] == "plainrice":
+            plainrice_yolo = max(
+                plainrice_yolo,
+                item["confidence"]
+            )
 
-    # YOLO
-    add_predictions(
-        scores,
-        yolo,
-        model_weight=1.00
-    )
+    for item in api2:
+        if item["food"] == "rice":
+            rice_api2 = max(
+                rice_api2,
+                item["confidence"]
+            )
 
-    # API 1
-    add_predictions(
-        scores,
-        api1,
-        model_weight=0.90
-    )
+    for item in api1:
+        if item["food"] == "whiterice":
+            whiterice_api1 = max(
+                whiterice_api1,
+                item["confidence"]
+            )
 
-    # API 2
-    add_predictions(
-        scores,
-        api2,
-        model_weight=0.90
-    )
+    # Explicit YOLO plainrice detection is highly valuable.
+    if plainrice_yolo >= 0.80:
 
-    return scores
+        scores["plainrice"] = (
+            scores.get("plainrice", 0.0)
+            + 0.85
+        )
+
+        # Generic rice should not override explicit plainrice.
+        scores["rice"] = max(
+            0.0,
+            scores.get("rice", 0.0) - 0.20
+        )
+
+        return "plainrice"
+
+    # Combination of explicit plain/white rice evidence.
+    if plainrice_yolo >= 0.60 and (
+        rice_api2 >= 0.75 or
+        whiterice_api1 >= 0.75
+    ):
+
+        scores["plainrice"] = (
+            scores.get("plainrice", 0.0)
+            + 0.60
+        )
+
+        return "plainrice"
+
+    # Strong generic rice evidence should remain rice.
+    if rice_api2 >= 0.85:
+
+        scores["rice"] = (
+            scores.get("rice", 0.0)
+            + 0.20
+        )
+
+    return None
 
 
 # ============================================================
-# SIDE-DISH PENALTY
+# MEAL CONTEXT RULE
 # ============================================================
 
-def apply_side_dish_penalty(scores):
-    """
-    Prevent a side dish from winning over a clearly detected
-    main food.
+def apply_meal_context(scores, yolo, api1, api2):
 
-    This is deliberately a moderate penalty rather than
-    completely removing side dishes.
-    """
+    # If this is clearly a meal containing several dishes,
+    # do not allow a repeated component such as Bhatura to
+    # automatically become the final image-level answer.
 
-    adjusted = dict(scores)
+    unique_foods = set(scores.keys())
 
-    main_food_scores = {
-        food: score
-        for food, score in scores.items()
-        if food in MAIN_FOODS
+    meal_indicators = {
+        "chole",
+        "plainrice",
+        "rice",
+        "chapati",
+        "bhatura",
+        "pickle",
+        "papadam",
+        "curd",
+        "sambar",
     }
 
-    side_food_scores = {
-        food: score
-        for food, score in scores.items()
-        if food in SIDE_DISHES
-    }
+    indicator_count = len(
+        unique_foods.intersection(meal_indicators)
+    )
 
-    if not main_food_scores or not side_food_scores:
-        return adjusted
+    if indicator_count >= 4:
 
-    strongest_main = max(main_food_scores.values())
+        # Protect explicit plainrice.
+        if scores.get("plainrice", 0.0) > 0:
 
-    for side_food, side_score in side_food_scores.items():
+            scores["plainrice"] += 0.45
 
-        # Side dishes are reduced when a meaningful main food
-        # is already present.
-        if strongest_main > 0.50:
-
-            penalty = min(
-                side_score * 0.35,
-                strongest_main * 0.30
-            )
-
-            adjusted[side_food] = max(
+            scores["bhatura"] = max(
                 0.0,
-                side_score - penalty
+                scores.get("bhatura", 0.0) - 0.15
             )
+
+        # Generic rice receives less priority than explicit
+        # plainrice in a mixed meal.
+        if "plainrice" in scores and "rice" in scores:
+
+            if scores["plainrice"] >= scores["rice"]:
+
+                scores["rice"] *= 0.85
+
+
+# ============================================================
+# SCORE ADJUSTMENT
+# ============================================================
+
+def adjust_scores(scores):
+
+    adjusted = {}
+
+    for food, score in scores.items():
+
+        value = score
+
+        value += main_food_bonus(food)
+
+        value -= accompaniment_penalty(food)
+
+        value = max(0.0, value)
+
+        adjusted[food] = value
 
     return adjusted
 
 
 # ============================================================
-# MAIN FOOD CONFLICT RESOLUTION
+# CONFIDENCE
 # ============================================================
 
-def resolve_main_food_conflicts(scores, original_scores):
-    """
-    Resolve known food-vs-food conflicts.
+def calculate_confidence(scores, winner, supporting_models):
 
-    The goal is NOT to blindly select the highest score.
-
-    Instead, if two foods are close and one is a more appropriate
-    main-food interpretation, preserve the main-food candidate.
-    """
-
-    adjusted = dict(scores)
-
-    # --------------------------------------------------------
-    # 1. DOSA vs OMELETTE
-    # --------------------------------------------------------
-
-    if "dosa" in original_scores and "omelette" in original_scores:
-
-        dosa_score = original_scores["dosa"]
-        omelette_score = original_scores["omelette"]
-
-        # If dosa is reasonably close to omelette, prefer dosa.
-        if dosa_score >= omelette_score * 0.90:
-
-            bonus = omelette_score * 0.18
-
-            adjusted["dosa"] = (
-                adjusted.get("dosa", 0.0) + bonus
-            )
-
-    # --------------------------------------------------------
-    # 2. POORI vs BHATURA
-    # --------------------------------------------------------
-
-    if "poori" in original_scores and "bhatura" in original_scores:
-
-        poori_score = original_scores["poori"]
-        bhatura_score = original_scores["bhatura"]
-
-        # Poori receives preference when it is reasonably
-        # close to bhatura.
-        if poori_score >= bhatura_score * 0.72:
-
-            bonus = bhatura_score * 0.22
-
-            adjusted["poori"] = (
-                adjusted.get("poori", 0.0) + bonus
-            )
-
-    # --------------------------------------------------------
-    # 3. SAMOSA vs GREEN CHUTNEY
-    # --------------------------------------------------------
-
-    if "samosa" in original_scores and "greenchutney" in original_scores:
-
-        samosa_score = original_scores["samosa"]
-        chutney_score = original_scores["greenchutney"]
-
-        # Green chutney is normally an accompaniment.
-        # Prefer samosa when its evidence is reasonably strong.
-        if samosa_score >= chutney_score * 0.62:
-
-            bonus = chutney_score * 0.30
-
-            adjusted["samosa"] = (
-                adjusted.get("samosa", 0.0) + bonus
-            )
-
-            adjusted["greenchutney"] = (
-                adjusted.get("greenchutney", 0.0)
-                - chutney_score * 0.15
-            )
-
-            adjusted["greenchutney"] = max(
-                0.0,
-                adjusted["greenchutney"]
-            )
-
-    # --------------------------------------------------------
-    # 4. PLAIN RICE vs GENERIC RICE
-    # --------------------------------------------------------
-
-    if "plainrice" in original_scores and "rice" in original_scores:
-
-        plainrice_score = original_scores["plainrice"]
-        rice_score = original_scores["rice"]
-
-        if plainrice_score >= rice_score * 0.70:
-
-            bonus = rice_score * 0.25
-
-            adjusted["plainrice"] = (
-                adjusted.get("plainrice", 0.0) + bonus
-            )
-
-    # --------------------------------------------------------
-    # 5. PLAIN RICE vs WHITE RICE
-    # --------------------------------------------------------
-
-    if "plainrice" in original_scores and "whiterice" in original_scores:
-
-        plainrice_score = original_scores["plainrice"]
-        whiterice_score = original_scores["whiterice"]
-
-        if plainrice_score >= whiterice_score * 0.70:
-
-            bonus = whiterice_score * 0.20
-
-            adjusted["plainrice"] = (
-                adjusted.get("plainrice", 0.0) + bonus
-            )
-
-    return adjusted
-
-
-# ============================================================
-# SMALL MAIN-FOOD PRIOR
-# ============================================================
-
-def apply_main_food_prior(scores):
-    """
-    Give a small preference to main foods.
-
-    This is intentionally small so that a genuinely strong
-    side-dish prediction can still win when appropriate.
-    """
-
-    adjusted = dict(scores)
-
-    for food in list(adjusted.keys()):
-
-        if food in MAIN_FOODS:
-
-            adjusted[food] *= 1.08
-
-    return adjusted
-
-
-# ============================================================
-# CONFIDENCE CALCULATION
-# ============================================================
-
-def calculate_confidence(
-    winner_score,
-    runner_score,
-    supporting_models,
-    number_of_candidates
-):
-    """
-    Calculate confidence from:
-
-    - Winner strength
-    - Winner margin
-    - Independent model support
-    - Number of competing candidates
-    """
-
-    if winner_score <= 0:
+    if not scores or winner is None:
         return 0.0
 
-    margin = max(
-        0.0,
-        winner_score - runner_score
+    ordered = sorted(
+        scores.values(),
+        reverse=True
     )
 
-    # Relative margin.
-    relative_margin = margin / max(
-        winner_score,
-        0.0001
+    winner_score = ordered[0]
+
+    second_score = (
+        ordered[1]
+        if len(ordered) > 1
+        else 0.0
     )
 
-    # Base confidence.
-    confidence = 35.0
+    total = sum(scores.values())
 
-    # Winner strength.
-    confidence += min(
-        25.0,
-        winner_score * 12.0
-    )
+    if total <= 0:
+        return 0.0
 
-    # Margin.
-    confidence += min(
-        30.0,
-        relative_margin * 40.0
-    )
+    share = winner_score / total
 
-    # Independent model support.
+    margin = winner_score - second_score
+
+    # Score-share contribution.
+    confidence = share * 100.0
+
+    # Strong model agreement gives additional confidence.
+    if supporting_models >= 2:
+        confidence += 8.0
+
     if supporting_models >= 3:
-        confidence += 12.0
-    elif supporting_models == 2:
-        confidence += 7.0
-    elif supporting_models == 1:
-        confidence -= 2.0
+        confidence += 5.0
 
-    # Many candidates make the decision harder.
-    if number_of_candidates >= 7:
-        confidence -= 5.0
-    elif number_of_candidates >= 5:
-        confidence -= 3.0
+    # Strong margin.
+    if margin >= 1.0:
+        confidence += 5.0
+    elif margin >= 0.50:
+        confidence += 2.0
+
+    # Avoid unrealistic confidence for very close decisions.
+    if margin < 0.10:
+        confidence = min(confidence, 49.0)
+
+    elif margin < 0.25:
+        confidence = min(confidence, 65.0)
 
     confidence = max(
         0.0,
@@ -511,19 +504,16 @@ def calculate_confidence(
 # DECISION LABEL
 # ============================================================
 
-def get_decision(confidence, margin):
-    """
-    Convert numerical confidence into a readable decision.
-    """
+def decision_label(confidence, margin):
 
-    if confidence >= 80.0 and margin >= 0.80:
+    if margin < 0.10:
+        return "AMBIGUOUS"
+
+    if confidence >= 75:
         return "HIGH CONFIDENCE"
 
-    if confidence >= 60.0 and margin >= 0.40:
+    if confidence >= 50:
         return "MODERATE CONFIDENCE"
-
-    if margin < 0.20:
-        return "AMBIGUOUS"
 
     return "LOW CONFIDENCE"
 
@@ -534,78 +524,40 @@ def get_decision(confidence, margin):
 
 def get_decision_reason(
     winner,
-    original_scores,
-    adjusted_scores
+    supporting_models,
+    special_rule=None
 ):
-    """
-    Explain why the final winner was selected.
-    """
 
-    winner = normalize_food(winner)
-
-    # Main food vs side dish.
-    if winner in MAIN_FOODS:
-
-        side_candidates = [
-            food
-            for food in original_scores
-            if food in SIDE_DISHES
-        ]
-
-        if side_candidates:
-            strongest_side = max(
-                side_candidates,
-                key=lambda food: original_scores[food]
-            )
-
-            if (
-                original_scores.get(strongest_side, 0.0)
-                >= original_scores.get(winner, 0.0) * 0.70
-            ):
-                return (
-                    "Main-food preference applied over "
-                    "accompaniment detection."
-                )
-
-    # Specific known conflicts.
-    if winner == "dosa":
-
-        if "omelette" in original_scores:
-            return (
-                "Dosa preserved through visual-conflict "
-                "resolution."
-            )
-
+    if special_rule == "poori":
         return (
-            "Dosa selected using fused model evidence."
+            "Explicit POORI evidence preserved over "
+            "Bhatura ambiguity."
         )
 
-    if winner == "poori":
+    if special_rule == "plainrice":
+        return (
+            "Explicit plain-rice evidence preserved "
+            "over generic rice or meal-component detection."
+        )
 
-        if "bhatura" in original_scores:
-            return (
-                "Poori preserved over visually similar "
-                "bhatura."
-            )
+    if winner in {
+        "dosa",
+        "samosa",
+        "poori",
+        "bhatura",
+    }:
+        return (
+            "Main-food preference applied over "
+            "accompaniment or visually similar food."
+        )
 
-    if winner == "samosa":
-
-        if "greenchutney" in original_scores:
-            return (
-                "Main-food samosa preferred over "
-                "green-chutney accompaniment."
-            )
-
-    if winner == "plainrice":
-
-        if "rice" in original_scores:
-            return (
-                "Explicit plain-rice detection preserved "
-                "over generic rice classification."
-            )
+    if supporting_models >= 2:
+        return (
+            "Multi-model evidence supports the selected food."
+        )
 
     return (
-        "Context-aware multi-model food selection."
+        "Context-aware single-model food selection."
     )
 
 
@@ -613,109 +565,156 @@ def get_decision_reason(
 # FINAL HYBRID DECISION
 # ============================================================
 
-def hybrid_decision(yolo, api1, api2):
-    """
-    Main V4 decision function.
-
-    Input:
-        yolo -> list of YOLO predictions
-        api1 -> list of API 1 predictions
-        api2 -> list of API 2 predictions
-
-    Output:
-        dictionary containing:
-            food
-            confidence
-            decision
-            supporting_models
-            winner_margin
-            decision_reason
-            scores
-    """
+def hybrid_decision(yolo_predictions, api1_predictions, api2_predictions):
 
     # --------------------------------------------------------
-    # STEP 1: Raw model fusion
+    # Normalize all model predictions
     # --------------------------------------------------------
 
-    original_scores = build_scores(
+    yolo = normalize_predictions(yolo_predictions)
+    api1 = normalize_predictions(api1_predictions)
+    api2 = normalize_predictions(api2_predictions)
+
+    # --------------------------------------------------------
+    # Aggregate evidence
+    # --------------------------------------------------------
+
+    yolo_scores = aggregate_predictions(yolo)
+    api1_scores = aggregate_predictions(api1)
+    api2_scores = aggregate_predictions(api2)
+
+    scores = defaultdict(float)
+
+    # --------------------------------------------------------
+    # Model weights
+    #
+    # YOLO:
+    # object/localization evidence
+    #
+    # API1:
+    # food recognition evidence
+    #
+    # API2:
+    # independent recognition evidence
+    # --------------------------------------------------------
+
+    for food, score in yolo_scores.items():
+        scores[food] += score * 1.00
+
+    for food, score in api1_scores.items():
+        scores[food] += score * 0.85
+
+    for food, score in api2_scores.items():
+        scores[food] += score * 0.95
+
+    # --------------------------------------------------------
+    # Base score adjustments
+    # --------------------------------------------------------
+
+    scores = defaultdict(
+        float,
+        adjust_scores(dict(scores))
+    )
+
+    # --------------------------------------------------------
+    # Special food-pair rules
+    # --------------------------------------------------------
+
+    special_rule = None
+
+    poori_result = resolve_poori_bhatura(
+        scores,
+        api1,
+        api2
+    )
+
+    if poori_result == "poori":
+        special_rule = "poori"
+
+    rice_result = resolve_rice(
+        scores,
         yolo,
         api1,
         api2
     )
 
-    if not original_scores:
-
-        return {
-            "food": "unknown",
-            "confidence": 0.0,
-            "decision": "NO PREDICTION",
-            "supporting_models": 0,
-            "winner_margin": 0.0,
-            "decision_reason": "No valid model predictions.",
-            "scores": {}
-        }
+    if rice_result == "plainrice":
+        special_rule = "plainrice"
 
     # --------------------------------------------------------
-    # STEP 2: Side-dish handling
+    # Meal context
     # --------------------------------------------------------
 
-    adjusted_scores = apply_side_dish_penalty(
-        original_scores
+    apply_meal_context(
+        scores,
+        yolo,
+        api1,
+        api2
     )
 
     # --------------------------------------------------------
-    # STEP 3: Main-food prior
+    # Samosa protection
     # --------------------------------------------------------
 
-    adjusted_scores = apply_main_food_prior(
-        adjusted_scores
-    )
+    if scores.get("samosa", 0.0) > 0:
 
-    # --------------------------------------------------------
-    # STEP 4: Specific conflict resolution
-    # --------------------------------------------------------
-
-    adjusted_scores = resolve_main_food_conflicts(
-        adjusted_scores,
-        original_scores
-    )
-
-    # --------------------------------------------------------
-    # STEP 5: Remove negative values
-    # --------------------------------------------------------
-
-    for food in adjusted_scores:
-
-        adjusted_scores[food] = max(
-            0.0,
-            adjusted_scores[food]
+        samosa_score = scores["samosa"]
+        chutney_score = scores.get(
+            "greenchutney",
+            0.0
         )
 
+        if samosa_score > 0:
+
+            scores["samosa"] += 0.20
+
+            if chutney_score > 0:
+
+                scores["greenchutney"] = max(
+                    0.0,
+                    chutney_score - 0.15
+                )
+
     # --------------------------------------------------------
-    # STEP 6: Sort candidates
+    # Dosa protection
     # --------------------------------------------------------
 
-    ranked = sorted(
-        adjusted_scores.items(),
-        key=lambda item: item[1],
-        reverse=True
+    if scores.get("dosa", 0.0) > 0:
+
+        dosa_score = scores["dosa"]
+
+        accompaniment_total = sum(
+            scores.get(food, 0.0)
+            for food in {
+                "coconutchutney",
+                "sambar",
+                "whitechutney",
+                "redchutney",
+                "curry",
+            }
+        )
+
+        # If Dosa is present, accompaniment detections
+        # should not collectively overpower it.
+        if accompaniment_total > dosa_score:
+
+            scores["dosa"] += 0.20
+
+    # --------------------------------------------------------
+    # Final winner
+    # --------------------------------------------------------
+
+    final_scores = dict(scores)
+
+    winner, winner_score = get_top_score(
+        final_scores
     )
 
-    winner = ranked[0][0]
-    winner_score = ranked[0][1]
-
-    if len(ranked) > 1:
-        runner_score = ranked[1][1]
-    else:
-        runner_score = 0.0
-
-    winner_margin = winner_score - runner_score
-
     # --------------------------------------------------------
-    # STEP 7: Supporting models
+    # Supporting model count
     # --------------------------------------------------------
 
-    supporting_models = get_model_support(
+    supporting_models = calculate_supporting_models(
         winner,
         yolo,
         api1,
@@ -723,55 +722,66 @@ def hybrid_decision(yolo, api1, api2):
     )
 
     # --------------------------------------------------------
-    # STEP 8: Confidence
+    # Winner margin
+    # --------------------------------------------------------
+
+    ordered_scores = sorted(
+        final_scores.values(),
+        reverse=True
+    )
+
+    second_score = (
+        ordered_scores[1]
+        if len(ordered_scores) > 1
+        else 0.0
+    )
+
+    winner_margin = winner_score - second_score
+
+    # --------------------------------------------------------
+    # Confidence
     # --------------------------------------------------------
 
     confidence = calculate_confidence(
-        winner_score,
-        runner_score,
-        supporting_models,
-        len(ranked)
+        final_scores,
+        winner,
+        supporting_models
     )
 
-    # --------------------------------------------------------
-    # STEP 9: Decision label
-    # --------------------------------------------------------
-
-    decision = get_decision(
+    decision = decision_label(
         confidence,
         winner_margin
     )
 
-    # --------------------------------------------------------
-    # STEP 10: Decision reason
-    # --------------------------------------------------------
-
-    decision_reason = get_decision_reason(
+    reason = get_decision_reason(
         winner,
-        original_scores,
-        adjusted_scores
+        supporting_models,
+        special_rule
     )
 
     # --------------------------------------------------------
-    # Return
+    # Rounded output
     # --------------------------------------------------------
+
+    rounded_scores = {
+        food: round(score, 4)
+        for food, score in final_scores.items()
+    }
 
     return {
         "food": winner,
         "confidence": confidence,
         "decision": decision,
         "supporting_models": supporting_models,
-        "winner_margin": round(winner_margin, 4),
-        "decision_reason": decision_reason,
-
-        # Return final adjusted scores.
-        "scores": {
-            food: round(score, 4)
-            for food, score in ranked
-        }
+        "winner_margin": round(
+            winner_margin,
+            4
+        ),
+        "decision_reason": reason,
+        "scores": rounded_scores,
     }
 
 
 # ============================================================
-# END OF V4 ENGINE
+# END OF HYBRID ENGINE V6
 # ============================================================

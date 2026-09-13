@@ -1,5 +1,5 @@
 # ============================================================
-# NUTRIVISION AI - FINAL HYBRID ENGINE V4 TEST
+# NUTRIVISION AI - FINAL HYBRID ENGINE V6 TEST
 # ============================================================
 
 from hybrid_engine import hybrid_decision
@@ -12,8 +12,6 @@ from hybrid_engine import hybrid_decision
 TEST_IMAGES = {
 
     "chapathi.png": {
-
-        "expected": "chapati",
 
         "yolo": [
             {"food": "chapati", "confidence": 0.8581},
@@ -31,8 +29,6 @@ TEST_IMAGES = {
 
 
     "dosa.png": {
-
-        "expected": "dosa",
 
         "yolo": [],
 
@@ -54,8 +50,6 @@ TEST_IMAGES = {
 
 
     "dosaj.jpg": {
-
-        "expected": "dosa",
 
         "yolo": [
             {
@@ -82,8 +76,6 @@ TEST_IMAGES = {
 
     "food.png": {
 
-        "expected": "biryani",
-
         "yolo": [
             {
                 "food": "biryani",
@@ -108,8 +100,6 @@ TEST_IMAGES = {
 
 
     "idle.jpg": {
-
-        "expected": "idli",
 
         "yolo": [
             {
@@ -180,8 +170,6 @@ TEST_IMAGES = {
 
     "meal.png": {
 
-        "expected": "plainrice",
-
         "yolo": [
             {
                 "food": "plainrice",
@@ -251,8 +239,6 @@ TEST_IMAGES = {
 
     "poha.png": {
 
-        "expected": "poha",
-
         "yolo": [
             {
                 "food": "poha",
@@ -277,8 +263,6 @@ TEST_IMAGES = {
 
 
     "poori.jpg": {
-
-        "expected": "poori",
 
         "yolo": [],
 
@@ -315,8 +299,6 @@ TEST_IMAGES = {
 
 
     "samosa.jpg": {
-
-        "expected": "samosa",
 
         "yolo": [
             {
@@ -355,8 +337,6 @@ TEST_IMAGES = {
 
     "voda.jpg": {
 
-        "expected": "vada",
-
         "yolo": [
             {
                 "food": "chickentikka",
@@ -377,15 +357,36 @@ TEST_IMAGES = {
             },
         ],
     },
+
 }
 
 
 # ============================================================
-# HEADER
+# EXPECTED RESULTS
+# ============================================================
+
+EXPECTED = {
+
+    "chapathi.png": "chapati",
+    "dosa.png": "dosa",
+    "dosaj.jpg": "dosa",
+    "food.png": "biryani",
+    "idle.jpg": "idli",
+    "meal.png": "plainrice",
+    "poha.png": "poha",
+    "poori.jpg": "poori",
+    "samosa.jpg": "samosa",
+    "voda.jpg": "vada",
+
+}
+
+
+# ============================================================
+# DISPLAY HEADER
 # ============================================================
 
 print("=" * 70)
-print("       NUTRIVISION AI - FINAL HYBRID ENGINE V4 TEST")
+print("       NUTRIVISION AI - FINAL HYBRID ENGINE V6 TEST")
 print("=" * 70)
 
 
@@ -409,13 +410,15 @@ for image_name, data in TEST_IMAGES.items():
     print("=" * 70)
 
     result = hybrid_decision(
+
         data["yolo"],
         data["api1"],
         data["api2"]
+
     )
 
     print()
-    print("FINAL HYBRID V4 RESULT")
+    print("FINAL HYBRID V6 RESULT")
     print("-" * 70)
 
     print(
@@ -456,18 +459,17 @@ for image_name, data in TEST_IMAGES.items():
         )
 
     # --------------------------------------------------------
-    # EXPECTED RESULT CHECK
+    # Check expected result
     # --------------------------------------------------------
 
-    expected = data["expected"]
-    predicted = result["food"]
+    expected = EXPECTED.get(image_name)
 
-    if predicted == expected:
+    if result["food"] == expected:
+
+        correct += 1
 
         print()
         print("STATUS: CORRECT")
-
-        correct += 1
 
     else:
 
@@ -490,7 +492,7 @@ accuracy = (
 
 print()
 print("=" * 70)
-print("                 FINAL V4 TEST SUMMARY")
+print("                 FINAL V6 TEST SUMMARY")
 print("=" * 70)
 
 print(
@@ -502,7 +504,5 @@ print(
 )
 
 print("=" * 70)
-print(
-    "              FINAL V4 ENGINE TEST COMPLETED"
-)
+print("              FINAL V6 ENGINE TEST COMPLETED")
 print("=" * 70)
