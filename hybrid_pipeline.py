@@ -6,14 +6,18 @@ from ultralytics import YOLO
 
 from hybrid_detector import hybrid_decision
 
+from dotenv import load_dotenv
+
 
 # ============================================================
 # SETTINGS
 # ============================================================
 
+load_dotenv()
 YOLO_MODEL = r"D:\NutriVisionAI\models\best.pt"
 
 API_KEY = os.getenv("ROBOFLOW_API_KEY")
+print("Roboflow API key loaded:", bool(API_KEY))
 
 API1_URL = "https://serverless.roboflow.com/indianfoodnet/1"
 
@@ -35,33 +39,31 @@ print("YOLO11 loaded successfully!")
 # YOLO11
 # ============================================================
 
+
 def run_yolo(image_path):
-
-    results = model(
-        image_path,
-        verbose=False
-    )
-
+    results = model(image_path, verbose=False)
     detections = []
 
     for result in results:
-
         if result.boxes is None:
             continue
 
         for box in result.boxes:
-
             class_id = int(box.cls[0])
             confidence = float(box.conf[0])
-
             food_name = model.names[class_id]
+
+            # Preserve bounding-box coordinates for segmentation
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
 
             detections.append({
                 "food": food_name,
-                "confidence": confidence
+                "confidence": confidence,
+                "bbox": [x1, y1, x2, y2],
             })
 
     return detections
+
 
 
 # ============================================================
@@ -99,50 +101,56 @@ def run_roboflow(image_path, api_url):
             timeout=30
         )
 
+        
+        print(f"\nRoboflow endpoint: {api_url}")
+        print("HTTP status:", response.status_code)
+
         if response.status_code != 200:
-
-            print(
-                f"Roboflow API error "
-                f"{response.status_code}: "
-                f"{response.text}"
-            )
-
+            print("Roboflow response:", response.text[:1000])
             return []
 
         result = response.json()
 
-        predictions = result.get(
-            "predictions",
-            []
-        )
+        # Temporarily print the response structure for diagnosis.
+        print("Response keys:", list(result.keys()))
+        print("Raw response preview:", str(result)[:1500])
+
+        predictions = result.get("predictions", [])
+        print("Prediction count:", len(predictions))
+
+
 
         detections = []
 
         for prediction in predictions:
+            food = prediction.get("class", "Unknown")
+            confidence = float(prediction.get("confidence", 0))
 
-            food = prediction.get(
-                "class",
-                "Unknown"
-            )
+            # Roboflow bounding-box coordinates
+            x = float(prediction.get("x", 0))
+            y = float(prediction.get("y", 0))
+            width = float(prediction.get("width", 0))
+            height = float(prediction.get("height", 0))
 
-            confidence = prediction.get(
-                "confidence",
-                0
-            )
+            if width <= 0 or height <= 0:
+                continue
 
             detections.append({
                 "food": food,
-                "confidence": confidence
+                "confidence": confidence,
+                "bbox": [
+                    x - width / 2,
+                    y - height / 2,
+                    x + width / 2,
+                    y + height / 2,
+                ],
             })
 
         return detections
 
     except Exception as e:
-
         print("API error:", e)
-
         return []
-
 
 # ============================================================
 # API 1
